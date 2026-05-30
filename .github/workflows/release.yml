@@ -31,10 +31,10 @@ jobs:
       - name: 打包 (electron-builder)
         run: npx electron-builder --win --publish=never
 
-      - name: 创建 Release 并上传附件
-        uses: softprops/action-gh-release@v1
-        with:
-          files: release/*.zip
-          generate_release_notes: true
+      - name: 上传 Release
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem release\*.zip | Select-Object -First 1
+          gh release create $env:GITHUB_REF_NAME $zip --title $env:GITHUB_REF_NAME --generate-notes
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
