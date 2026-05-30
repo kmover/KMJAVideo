@@ -10,6 +10,28 @@
 -   **演员头像** — 自动下载演员头像
 -   **数据持久化** — SQLite 本地存储，数据随身携带
 
+## 截图
+
+**影片浏览**
+
+![](screenshots/1.jpg)
+
+**演员管理**
+
+![](screenshots/2.jpg)
+
+**影片详情**
+
+![](screenshots/3.jpg)
+
+**数据采集**
+
+![](screenshots/4.jpg)
+
+**设置**
+
+![](screenshots/5.jpg)
+
 ## 技术栈
 
 | 层级 | 技术 |
