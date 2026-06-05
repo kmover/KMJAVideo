@@ -97,6 +97,36 @@
           </div>
         </div>
       </div>
+
+      <!-- 数据管理区 -->
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-database"></i> 数据管理</div>
+        <div class="card-desc">管理影片库数据。清空仅删除 movies 表，movies_info 元数据不会丢失。</div>
+
+        <!-- 数据库统计 -->
+        <div v-if="dbStats" class="db-stats">
+          <div class="stat-row">
+            <span class="stat-label">影片总数</span>
+            <span class="stat-value">{{ dbStats.movieCount }}</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">已采集信息</span>
+            <span class="stat-value">{{ dbStats.infoCount }}</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">数据库大小</span>
+            <span class="stat-value">{{ fmtSize(dbStats.dbSize) }}</span>
+          </div>
+        </div>
+
+        <div class="dm-actions">
+          <button class="btn btn-outline btn-danger" @click="doClearAll" :disabled="dmBusy">
+            <i class="fa-solid fa-trash"></i> 清空影片列表
+          </button>
+        </div>
+
+        <div v-if="dmMsg" class="dm-msg" :class="dmMsgType">{{ dmMsg }}</div>
+      </div>
     </div>
   </div>
 </template>
@@ -205,7 +235,58 @@ async function startImport() {
   }
 }
 
-onMounted(loadDirs)
+// ---------- 数据管理 ----------
+const dbStats = ref(null)
+const dmBusy = ref(false)
+const dmMsg = ref('')
+const dmMsgType = ref('')
+
+function fmtSize(bytes) {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1048576).toFixed(1) + ' MB'
+}
+
+async function loadDbStats() {
+  try {
+    dbStats.value = await api?.getDbStats()
+  } catch (e) {
+    console.error('[设置] 数据库统计失败:', e)
+  }
+}
+
+async function doClearAll() {
+  if (!confirm('确定要清空所有影片列表吗？\n\n此操作仅删除 movies 表中的影片记录，\nmovies_info 元数据不会丢失。')) return
+
+  dmBusy.value = true
+  dmMsg.value = ''
+  try {
+    const res = await api?.clearAllData()
+    if (res?.success) {
+      showMsg('ok', `已清空 ${res.deletedCount} 部影片，元数据未受影响。`)
+      await loadDbStats()
+      window.dispatchEvent(new CustomEvent('db:changed'))
+    } else {
+      showMsg('err', '清空失败: ' + (res?.error || '未知错误'))
+    }
+  } catch (e) {
+    showMsg('err', '清空出错: ' + e.message)
+  } finally {
+    dmBusy.value = false
+  }
+}
+
+function showMsg(type, text) {
+  dmMsg.value = text
+  dmMsgType.value = type
+  setTimeout(() => { dmMsg.value = '' }, 5000)
+}
+
+onMounted(() => {
+  loadDirs()
+  loadDbStats()
+})
 </script>
 
 <style scoped>
@@ -473,5 +554,67 @@ onMounted(loadDirs)
   color: var(--accent);
   padding: 3px 0;
   word-break: break-all;
+}
+
+/* 数据管理 */
+.db-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 20px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  padding: 4px 0;
+}
+.stat-label {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.stat-value {
+  color: var(--text-primary);
+  font-family: 'Consolas', monospace;
+  font-size: 12px;
+  text-align: right;
+}
+
+.dm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-danger {
+  color: var(--accent) !important;
+  border-color: rgba(233,69,96,0.3) !important;
+}
+.btn-danger:hover:not(:disabled) {
+  background: rgba(233,69,96,0.08) !important;
+  border-color: var(--accent) !important;
+}
+
+.dm-msg {
+  margin-top: 14px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.dm-msg.ok {
+  background: rgba(78,205,196,0.12);
+  border: 1px solid rgba(78,205,196,0.3);
+  color: #4ecdc4;
+}
+.dm-msg.err {
+  background: rgba(233,69,96,0.12);
+  border: 1px solid rgba(233,69,96,0.3);
+  color: var(--accent);
 }
 </style>

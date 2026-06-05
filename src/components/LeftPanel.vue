@@ -36,7 +36,6 @@ function switchNav(key) {
 const menu = [
   { key: 'home',     icon: 'fa-solid fa-film',         label: '影片' },
   { key: 'actors',   icon: 'fa-solid fa-user-group',   label: '演员' },
-  { key: 'collect',  icon: 'fa-solid fa-cloud-arrow-down', label: '采集' },
   { key: 'settings', icon: 'fa-solid fa-gear',         label: '设置' },
 ]
 </script>

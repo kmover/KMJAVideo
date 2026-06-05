@@ -15,7 +15,6 @@
       <div class="content-panel">
         <SettingsPanel v-if="currentNav === 'settings'" />
         <ActorsPanel v-else-if="currentNav === 'actors'" />
-        <CollectorPanel v-else-if="currentNav === 'collect'" />
         <RightPanel v-else />
       </div>
     </div>
@@ -32,7 +31,6 @@ import LeftPanel from './components/LeftPanel.vue'
 import RightPanel from './components/RightPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import ActorsPanel from './components/ActorsPanel.vue'
-import CollectorPanel from './components/CollectorPanel.vue'
 import DetailWindow from './components/DetailWindow.vue'
 import BottomBar from './components/BottomBar.vue'
 

@@ -36,21 +36,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (data) => ipcRenderer.invoke('config:set', data),
 
-  // 采集
-  getCollectorTasks: () => ipcRenderer.invoke('collector:getTaskList'),
-  downloadCollectorImage: (name, url) => ipcRenderer.invoke('collector:downloadOne', name, url),
-
   // 重新从磁盘加载数据库（手动修改 db 文件后使用）
   reloadDatabase: () => ipcRenderer.invoke('db:reload'),
 
-  // JAVDB 影片信息采集
-  getUncollectedNums: () => ipcRenderer.invoke('scraper:getUncollected'),
-  scrapeMovieInfo: (num, opts) => ipcRenderer.invoke('scraper:scrapeOne', num, opts),
-  checkCookie: () => ipcRenderer.invoke('scraper:checkCookie'),
-  onScraperProgress: (callback) => {
-    const handler = (_event, data) => callback(data)
-    ipcRenderer.on('scraper:progress', handler)
-    // 返回取消监听的函数
-    return () => ipcRenderer.removeListener('scraper:progress', handler)
-  },
+  // 数据管理
+  getDbStats: () => ipcRenderer.invoke('db:getStats'),
+  clearAllData: () => ipcRenderer.invoke('db:clearAll'),
 })

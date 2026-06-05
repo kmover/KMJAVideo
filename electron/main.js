@@ -2,7 +2,6 @@ const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } = require('e
 const path = require('path')
 const fs = require('fs')
 const { execFile } = require('child_process')
-const { scrapeMovie, destroyScraper } = require('./scraper-javdb')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -168,7 +167,7 @@ function createWindow() {
     }
   })
 
-  mainWindow.maximize()
+  // mainWindow.maximize()
 
   // 窗口控制（自动识别调用者，兼容主窗口和详情子窗口）
   ipcMain.on('window-minimize', (event) => {
@@ -318,112 +317,6 @@ function createWindow() {
     }
   })
 
-  // ---------- 采集：演员头像下载 ----------
-  let _jsonActorCache = null
-
-  function jsonActorMap() {
-    if (_jsonActorCache) return _jsonActorCache
-    const jsonPath = path.join(getAppRoot(), 'data', 'Filetree.json')
-    if (!fs.existsSync(jsonPath)) {
-      console.error('[Collector] Filetree.json 不存在:', jsonPath)
-      _jsonActorCache = {}
-      return _jsonActorCache
-    }
-    try {
-      const data = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'))
-      const content = data.Content || {}
-      const map = {}
-      for (const folder of Object.keys(content)) {
-        const files = content[folder]
-        if (!files || typeof files !== 'object') continue
-        for (const filename of Object.keys(files)) {
-          const name = path.parse(filename).name
-          map[name] = { folder, value: files[filename] }
-        }
-      }
-      console.log(`[Collector] JSON 头像个: ${Object.keys(map).length}`)
-      _jsonActorCache = map
-      return map
-    } catch (e) {
-      console.error('[Collector] JSON 解析失败:', e)
-      _jsonActorCache = {}
-      return _jsonActorCache
-    }
-  }
-
-  ipcMain.handle('collector:getTaskList', () => {
-    try {
-      const rows = queryAll("SELECT actors FROM movies_info WHERE actors IS NOT NULL AND actors != ''")
-      const actorSet = new Set()
-      for (const r of rows) {
-        for (const name of r.actors.split(',')) {
-          const t = name.trim()
-          if (t) actorSet.add(t)
-        }
-      }
-      const map = jsonActorMap()
-      const base = getResourceBase()
-      const actorsDir = path.join(base, 'data', 'actors')
-      const tasks = []
-
-      for (const actor of actorSet) {
-        const imgPath = path.join(actorsDir, actor + '.jpg')
-        if (fs.existsSync(imgPath)) continue
-        const info = map[actor]
-        if (!info) continue
-        const { folder, value } = info
-        let pathPart = value, qs = ''
-        const qi = value.indexOf('?')
-        if (qi !== -1) { pathPart = value.substring(0, qi); qs = value.substring(qi + 1) }
-        const url = `https://github.com/kmover/gfriends/raw/refs/heads/master/Content/${encodeURI(folder + '/' + pathPart)}${qs ? '?' + qs : ''}`
-        tasks.push({ name: actor, url })
-      }
-
-      return {
-        dbTotal: actorSet.size,
-        jsonTotal: Object.keys(map).length,
-        taskCount: tasks.length,
-        tasks,
-      }
-    } catch (e) {
-      console.error('[Collector] getTaskList error:', e)
-      return { dbTotal: 0, jsonTotal: 0, taskCount: 0, tasks: [], error: e.message }
-    }
-  })
-
-  ipcMain.handle('collector:downloadOne', async (_event, name, url) => {
-    const dst = path.join(getResourceBase(), 'data', 'actors', name + '.jpg')
-    const dir = path.dirname(dst)
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    return new Promise((resolve) => {
-      const https = require('https')
-      const opt = {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-        timeout: 30000,
-      }
-      function doGet(u) {
-        https.get(u, opt, (res) => {
-          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            return doGet(res.headers.location)
-          }
-          if (res.statusCode !== 200) {
-            return resolve({ success: false, error: `HTTP ${res.statusCode}` })
-          }
-          const chunks = []
-          res.on('data', c => chunks.push(c))
-          res.on('end', () => {
-            try {
-              fs.writeFileSync(dst, Buffer.concat(chunks))
-              resolve({ success: true, size: Buffer.concat(chunks).length })
-            } catch (e) { resolve({ success: false, error: e.message }) }
-          })
-          res.on('error', e => resolve({ success: false, error: e.message }))
-        }).on('error', e => resolve({ success: false, error: e.message }))
-      }
-      doGet(url)
-    })
-  })
-
   // ---------- 重新从磁盘加载数据库 ----------
   ipcMain.handle('db:reload', async () => {
     try {
@@ -441,81 +334,6 @@ function createWindow() {
       console.error('[DB] 重载失败:', e)
       return { success: false, error: e.message }
     }
-  })
-
-  // ---------- JAVDB 影片信息采集 ----------
-  ipcMain.handle('scraper:getUncollected', () => {
-    try {
-      const rows = queryAll(`
-        SELECT m.num FROM movies m
-        WHERE NOT EXISTS (
-          SELECT 1 FROM movies_info mi WHERE mi.num = m.num COLLATE NOCASE
-        )
-        ORDER BY m.num ASC
-      `)
-      return rows.map(r => r.num)
-    } catch (e) {
-      console.error('[Scraper] getUncollected error:', e)
-      return []
-    }
-  })
-
-  ipcMain.handle('scraper:scrapeOne', async (event, num, opts) => {
-    try {
-      const cookiePath = path.join(getAppRoot(), 'data', 'javdb.com.txt')
-      const info = await scrapeMovie(num, {
-        cookiePath,
-        index: opts?.index,
-        total: opts?.total,
-        onProgress: (data) => {
-          event.sender.send('scraper:progress', data)
-        },
-      })
-      if (!info) return { success: false, error: `未找到番号 ${num} 的信息`, num }
-
-      // 写入 movies_info 表
-      const now = new Date().toISOString()
-      db.run(`
-        INSERT OR REPLACE INTO movies_info
-        (num, title, originaltitle, studio, maker, label, year, premiered,
-         release_date, runtime, director, plot, actors, tags, website, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        info.num || num,
-        info.title || '',
-        info.title || '',
-        info.studio || '',
-        info.studio || '',
-        info.label || '',
-        info.year || null,
-        info.premiered || '',
-        info.release_date || '',
-        info.runtime ? parseInt(info.runtime) : null,
-        info.director || '',
-        info.plot || '',
-        info.actors || '',
-        info.tags || '',
-        info.website || '',
-        now,
-      ])
-
-      saveDatabase()
-      return { success: true, num: info.num || num, data: info }
-    } catch (e) {
-      console.error('[Scraper] scrapeOne error:', e)
-      return { success: false, error: e.message, num }
-    }
-  })
-
-  // 检测 Cookie 文件状态
-  ipcMain.handle('scraper:checkCookie', () => {
-    const p = path.join(getAppRoot(), 'data', 'javdb.com.txt')
-    const exists = fs.existsSync(p)
-    let content = ''
-    if (exists) {
-      try { content = fs.readFileSync(p, 'utf-8').trim() } catch (_) {}
-    }
-    return { exists, path: p, length: content.length }
   })
 
   // ---------- 目录选择 ----------
@@ -657,6 +475,42 @@ function createWindow() {
     }
   })
 
+  // ---------- 数据管理 ----------
+
+  // 数据库统计
+  ipcMain.handle('db:getStats', () => {
+    try {
+      if (!db) return { movieCount: 0, infoCount: 0, dbSize: 0, dbPath: '' }
+      const mc = queryOne('SELECT COUNT(*) as cnt FROM movies')
+      const ic = queryOne('SELECT COUNT(*) as cnt FROM movies_info')
+      const dbPath = getDbPath()
+      const dbSize = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0
+      return {
+        movieCount: mc ? mc.cnt : 0,
+        infoCount: ic ? ic.cnt : 0,
+        dbSize,
+        dbPath,
+      }
+    } catch (e) {
+      console.error('[DB] getStats error:', e)
+      return { movieCount: 0, infoCount: 0, dbSize: 0, dbPath: '', error: e.message }
+    }
+  })
+
+  // 清空 movies 表数据（不动 movies_info）
+  ipcMain.handle('db:clearAll', () => {
+    try {
+      if (!db) return { success: false, error: '数据库未加载' }
+      const count = queryOne('SELECT COUNT(*) as cnt FROM movies')
+      db.run('DELETE FROM movies')
+      saveDatabase()
+      return { success: true, deletedCount: count ? count.cnt : 0 }
+    } catch (e) {
+      console.error('[DB] clearAll error:', e)
+      return { success: false, error: e.message }
+    }
+  })
+
   // ---------- 配置读写 ----------
   ipcMain.handle('config:get', () => loadConfig())
   ipcMain.handle('config:set', (_event, data) => {
@@ -711,34 +565,6 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'asset', privileges: { bypassCSP: true, stream: true, supportFetchAPI: true } }
 ])
 
-// ---------- Filetree.json 运行时下载 ----------
-async function ensureFiletreeJson() {
-  const jsonPath = path.join(getAppRoot(), 'data', 'Filetree.json')
-  if (fs.existsSync(jsonPath)) return
-
-  const dataDir = path.dirname(jsonPath)
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
-
-  console.log('[Startup] 正在下载 Filetree.json ...')
-  try {
-    // 使用 electron net.fetch 避免证书等问题
-    const response = await net.fetch('https://github.com/kmover/gfriends/raw/refs/heads/master/Filetree.json')
-    if (!response.ok) {
-      console.error('[Startup] Filetree.json 下载失败: HTTP', response.status)
-      return
-    }
-    const text = await response.text()
-    fs.writeFileSync(jsonPath, text, 'utf-8')
-    console.log('[Startup] Filetree.json 下载完成')
-  } catch (e) {
-    console.error('[Startup] Filetree.json 下载失败:', e.message)
-  }
-}
-
-// ---------- 反自动化检测 (Cloudflare 绕过) ----------
-app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors')
-app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
-// 这些必须在 app ready 之前设置
 
 // ---------- 启动 ----------
 app.whenReady().then(async () => {
@@ -753,12 +579,10 @@ app.whenReady().then(async () => {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
 
   await initDatabase()
-  await ensureFiletreeJson()
   createWindow()
 })
 
 app.on('window-all-closed', () => {
-  destroyScraper()
   if (process.platform !== 'darwin') app.quit()
 })
 
